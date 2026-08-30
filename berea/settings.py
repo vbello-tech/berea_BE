@@ -71,13 +71,12 @@ REST_FRAMEWORK = {
 
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_ALL_ORIGINS = True
-CSRF_TRUSTED_ORIGINS = True
 
-# CSRF_TRUSTED_ORIGINS = [
-#     "https://berea-beta.vercel.app",
-#     "http://localhost:5173",
-#     "http://127.0.0.1:5173",
-# ]
+CSRF_TRUSTED_ORIGINS = [
+    "https://berea-beta.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
 
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
