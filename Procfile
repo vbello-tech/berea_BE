@@ -1,5 +1,5 @@
 #railway procfile
 
-web: gunicorn chancel.wsgi:application --log-file - --log-level debug
+web: gunicorn berea.wsgi:application --log-file - --log-level debug
 
 
