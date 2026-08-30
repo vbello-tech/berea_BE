@@ -15,5 +15,8 @@ bible/fixtures/kjv/__pycache__/
 bible/fixtures/strongs/__pycache__/
 bible/fixtures/tagnt/__pycache__/
 bible/fixtures/tahot__pycache__/
+.env
+.DS_Store
+
 
 
