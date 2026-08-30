@@ -63,11 +63,11 @@ REST_FRAMEWORK = {
 # Allow the standalone frontend (served from a different origin/port, or
 # opened as a local file) to call this API during development.
 # PRODUCTION SETTINGS
-# CORS_ALLOWED_ORIGINS = [
-#     "https://berea-beta.vercel.app",
-#     "http://localhost:5173",
-#     "http://127.0.0.1:5173",
-# ]
+CORS_ALLOWED_ORIGINS = [
+    "https://berea-beta.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
 
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_ALL_ORIGINS = True
