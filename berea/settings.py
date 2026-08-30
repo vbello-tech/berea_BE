@@ -63,14 +63,14 @@ REST_FRAMEWORK = {
 # Allow the standalone frontend (served from a different origin/port, or
 # opened as a local file) to call this API during development.
 # PRODUCTION SETTINGS
-CSRF_TRUSTED_ORIGINS = ['https://berea-api.up.railway.app', 'https://berea-beta.vercel.app/', ]
+CSRF_TRUSTED_ORIGINS = ['https://berea-api.up.railway.app', 'https://berea-beta.vercel.app', ]
 CORS_ORIGIN_ALLOW_ALL = True
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_BROWSER_XSS_FILTER = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
-    "https://berea-beta.vercel.app/",
+    "https://berea-beta.vercel.app",
 ]
 
 MIDDLEWARE = [
