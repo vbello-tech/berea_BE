@@ -17,6 +17,8 @@ bible/fixtures/tagnt/__pycache__/
 bible/fixtures/tahot__pycache__/
 .env
 .DS_Store
+search/__pycache__/
+search/migrations/__pycache__/
 
 
 

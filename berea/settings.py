@@ -47,6 +47,8 @@ INSTALLED_APPS = [
     'bible',
     'notes',
     'accounts',
+    'search',
+    'django.contrib.postgres',
 ]
 
 MIDDLEWARE = [
