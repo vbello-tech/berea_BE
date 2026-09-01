@@ -49,7 +49,6 @@ INSTALLED_APPS = [
     'accounts',
     'search',
     'django.contrib.postgres',
-    'sermon',
     'django_filters',
 ]
 
