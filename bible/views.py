@@ -1,13 +1,12 @@
-
 import re
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
-from difflib import get_close_matches
-from django.db.models import Q
+import re
 
+from .book_order import BOOK_NAME_BY_LOWER
 from .models import Verse, StrongsEntry
 from .serializers import VerseSerializer, StrongsEntrySerializer
 
@@ -17,36 +16,68 @@ from .serializers import VerseSerializer, StrongsEntrySerializer
 def passage_view(request):
     """
     GET /api/passage/?book=John&chapter=3&start=16&end=17&translation=KJV
+    GET /api/passage/?book=John&chapter=3&translation=KJV
+        (start/end omitted -> returns the entire chapter)
 
-    Returns the verses in the given range, each with its concordance
-    entries and cross references nested inline.
+    Returns the verses in the given range (or the whole chapter, if start
+    is omitted), each with its concordance entries, cross references, and
+    word tags nested inline.
+
+    Book names and translation codes are normalized in Python and matched
+    with exact equality rather than Django's __iexact lookup. __iexact
+    wraps the column in UPPER(...), and on this same project's search
+    endpoint that was measured (via EXPLAIN ANALYZE) to make Postgres
+    badly misestimate row counts and fall back to a sequential scan instead
+    of the index on (book, chapter, verse_number, translation) -- ~700ms
+    vs ~20ms for an otherwise-identical query. Since book names and
+    translation codes are both small, known vocabularies, normalizing them
+    in Python and comparing with `=` avoids the problem entirely while
+    also giving a clearer 400 for a genuinely unknown book, instead of a
+    404 that could be mistaken for "this chapter/verse doesn't exist".
     """
-    book = request.query_params.get('book')
+    book_param = request.query_params.get('book')
     chapter = request.query_params.get('chapter')
     start = request.query_params.get('start')
     end = request.query_params.get('end', start)
-    translation = request.query_params.get('translation', 'KJV')
+    translation = request.query_params.get('translation', 'KJV').upper()
     xref_limit = int(request.query_params.get('xref_limit', 10))
 
-    if not (book and chapter and start):
+    if not (book_param and chapter):
         return Response(
-            {'detail': 'book, chapter, and start query params are required.'},
+            {'detail': 'book and chapter query params are required '
+                       '(start/end are optional -- omit both to get the whole chapter).'},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    verses = Verse.objects.filter(
-        book__name__iexact=book,
-        chapter=chapter,
-        verse_number__gte=start,
-        verse_number__lte=end,
-        translation__iexact=translation,
-    ).select_related('book').prefetch_related(
-        'concordance_entries', 'cross_references', 'word_tags', 'bulk_cross_references'
+    canonical_book = BOOK_NAME_BY_LOWER.get(book_param.lower())
+    if not canonical_book:
+        return Response({'detail': f'Unknown book: {book_param}'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        chapter = int(chapter)
+    except ValueError:
+        return Response({'detail': 'chapter must be an integer.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    verses = Verse.objects.filter(book__name=canonical_book, chapter=chapter, translation=translation)
+
+    if start is not None:
+        try:
+            start = int(start)
+            end = int(end)
+        except ValueError:
+            return Response({'detail': 'start/end must be integers.'}, status=status.HTTP_400_BAD_REQUEST)
+        verses = verses.filter(verse_number__gte=start, verse_number__lte=end)
+
+    verses = list(
+        verses.select_related('book')
+        .prefetch_related('concordance_entries', 'cross_references', 'word_tags', 'bulk_cross_references')
+        .order_by('verse_number')
     )
 
-    if not verses.exists():
+    if not verses:
+        range_desc = f'{start}-{end}' if start is not None else 'whole chapter'
         return Response(
-            {'detail': f'No verses found for {book} {chapter}:{start}-{end} ({translation}).'},
+            {'detail': f'No verses found for {canonical_book} {chapter}:{range_desc} ({translation}).'},
             status=status.HTTP_404_NOT_FOUND,
         )
 
@@ -65,7 +96,7 @@ def concordance_search_view(request):
     if term:
         verses = verses.filter(concordance_entries__english_term__icontains=term)
     if strongs:
-        verses = verses.filter(concordance_entries__strongs_number__iexact=strongs)
+        verses = verses.filter(concordance_entries__strongs_number=strongs.upper())
 
     verses = verses.distinct().select_related('book').prefetch_related(
         'concordance_entries', 'cross_references'
@@ -137,7 +168,7 @@ def strongs_lookup_view(request):
 
     if number:
         try:
-            entry = StrongsEntry.objects.get(number__iexact=number)
+            entry = StrongsEntry.objects.get(number=number.upper())
         except StrongsEntry.DoesNotExist:
             return Response({'detail': f'No Strongs entry for {number}.'}, status=404)
         data = StrongsEntrySerializer(entry).data

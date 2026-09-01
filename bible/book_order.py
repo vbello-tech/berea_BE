@@ -23,3 +23,12 @@ BOOK_ORDER = [
 ]
 
 BOOK_ORDER_MAP = {name: (i + 1, testament) for i, (name, testament) in enumerate(BOOK_ORDER)}
+
+# Case-insensitive lookup, e.g. "1 john" -> "1 John". Used wherever a book
+# name arrives from a query param and needs normalizing to the canonical
+# name for an exact-match DB filter -- avoids Django's __iexact lookup,
+# which wraps the column in UPPER(...) and can badly distort Postgres's
+# query planning on larger tables (verified on Verse: an __iexact filter
+# combined with ordering flipped an index scan into a sequential scan,
+# ~700ms vs ~20ms for an otherwise-identical query).
+BOOK_NAME_BY_LOWER = {name.lower(): name for name in BOOK_ORDER_MAP}
