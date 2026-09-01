@@ -173,6 +173,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://berea-beta.vercel.app",
     "http://localhost:5173",
     "http://127.0.0.1:5500",
+    "https://berea-api.up.railway.app",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -182,6 +183,7 @@ CSRF_TRUSTED_ORIGINS = [
     "https://berea-beta.vercel.app",
     "http://localhost:5173",
     "http://127.0.0.1:5500",
+    "https://berea-api.up.railway.app",
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [r'^https://berea.*\.vercel\.app$']
