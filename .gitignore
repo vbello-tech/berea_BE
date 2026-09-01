@@ -19,6 +19,9 @@ bible/fixtures/tahot__pycache__/
 .DS_Store
 search/__pycache__/
 search/migrations/__pycache__/
+sermon/__pycache__/
+sermon/migrations/__pycache__/
+sermon/
 
 
 

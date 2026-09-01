@@ -10,5 +10,6 @@ urlpatterns = [
     path('api/', include('notes.urls')),
     path('api/auth/', include('accounts.urls')),
     path('api/', include('search.urls')),
+    path('api/', include('sermon.urls')),
 ]
 
