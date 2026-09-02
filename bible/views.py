@@ -1,5 +1,3 @@
-import re
-
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -209,50 +207,3 @@ def strongs_lookup_view(request):
     return Response({'detail': 'Provide a number or word query param.'}, status=400)
 
 
-# SEARCH< TO BE REMOVED LATTER
-
-
-# In your bible app's views.py
-
-@api_view(['GET'])
-def search(request):
-    query = request.GET.get('q', '').strip()
-    translation = request.GET.get('translation', 'KJV')
-    limit = int(request.GET.get('limit', 50))
-
-    if not query:
-        return Response({'results': [], 'query': query, 'fuzzy': False})
-
-    # 1. Exact/substring match first — works for both single words and phrases
-    qs = Verse.objects.filter(translation=translation, text__icontains=query)[:limit]
-    fuzzy = False
-    corrected_query = None
-
-    if not qs.exists():
-        # 2. Fuzzy fallback: find the closest real words in this translation's
-        # vocabulary to what the user typed (handles typos / near-misses),
-        # then re-search using the corrected terms.
-        fuzzy = True
-        all_words = set()
-        for text in Verse.objects.filter(translation=translation).values_list('text', flat=True):
-            all_words.update(re.findall(r"[A-Za-z']+", text.lower()))
-
-        corrected_words = []
-        for word in re.findall(r"[A-Za-z']+", query.lower()):
-            close = get_close_matches(word, all_words, n=1, cutoff=0.7)
-            corrected_words.append(close[0] if close else word)
-
-        corrected_query = ' '.join(corrected_words)
-        qs = Verse.objects.filter(translation=translation, text__icontains=corrected_query)[:limit]
-
-        if not qs.exists():
-            q_obj = Q()
-            for w in corrected_words:
-                q_obj |= Q(text__icontains=w)
-            qs = Verse.objects.filter(translation=translation).filter(q_obj)[:limit]
-
-    results = [
-        {'book': v.book, 'chapter': v.chapter, 'verse_number': v.verse_number, 'text': v.text}
-        for v in qs
-    ]
-    return Response({'results': results, 'query': query, 'fuzzy': fuzzy, 'corrected_query': corrected_query})

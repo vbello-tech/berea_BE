@@ -65,9 +65,9 @@ def search_view(request):
     book_param = request.query_params.get('book')
     testament = request.query_params.get('testament')
     try:
-        limit = min(int(request.query_params.get('limit', 20)), 100)
+        limit = min(int(request.query_params.get('limit', 30)), 100)
     except ValueError:
-        limit = 20
+        limit = 30
 
     if not query:
         return Response({'detail': 'Provide a q query param.'}, status=400)
@@ -111,3 +111,5 @@ def search_view(request):
         })
 
     return Response({'query': query, 'count': len(results), 'results': results})
+
+
