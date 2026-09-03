@@ -90,7 +90,7 @@ def concordance_search_view(request):
     term = request.query_params.get('term')
     strongs = request.query_params.get('strongs')
 
-    verses = Verse.objects.all()
+    verses = Verse.objects.filter(translation='KJV')
     if term:
         verses = verses.filter(concordance_entries__english_term__icontains=term)
     if strongs:
