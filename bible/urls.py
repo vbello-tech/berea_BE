@@ -6,3 +6,4 @@ urlpatterns = [
     path('concordance/', views.concordance_search_view, name='concordance-search'),
     path('strongs/', views.strongs_lookup_view, name='strongs-lookup'),
 ]
+

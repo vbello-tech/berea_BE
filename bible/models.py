@@ -19,8 +19,8 @@ class StrongsEntry(models.Model):
     kjv_def = models.TextField(
         blank=True,
         help_text="How the KJV renders this word, e.g. '(be-)love(-ed)'. "
-                   "Used for reverse word-lookup since we don't have a "
-                   "verse-tagged text.",
+                  "Used for reverse word-lookup since we don't have a "
+                  "verse-tagged text.",
     )
 
     class Meta:
@@ -70,7 +70,8 @@ class ConcordanceEntry(models.Model):
     """Maps an English word as it appears in a specific verse to its original-language term."""
     verse = models.ForeignKey(Verse, on_delete=models.CASCADE, related_name='concordance_entries')
     english_term = models.CharField(max_length=50)
-    original_word = models.CharField(max_length=100, help_text="e.g. 'agapa\u014d (\u1f00\u03b3\u03b1\u03c0\u03ac\u03c9)'")
+    original_word = models.CharField(max_length=100,
+                                     help_text="e.g. 'agapa\u014d (\u1f00\u03b3\u03b1\u03c0\u03ac\u03c9)'")
     strongs_number = models.CharField(max_length=10, help_text="e.g. G25 or H7462")
     occurrence_count = models.CharField(
         max_length=10,
@@ -144,6 +145,48 @@ class CrossReferenceLink(models.Model):
         return f"{self.from_verse} -> {self.to_reference_label} ({self.votes} votes)"
 
 
+class KjvStrongsTag(models.Model):
+    """
+    A single English KJV word tagged with its real Strong's number(s),
+    sourced from a KJV-native Strong's tagging (the historical tradition
+    Strong himself started: numbers tagged directly onto the actual King
+    James wording, not a modern gloss).
+
+    This is a different thing from WordTag: WordTag tags the original
+    Greek/Hebrew text in its own word order (from STEPBible-Data, aligned
+    to a modern English gloss for reference, not to this KJV). This model
+    instead tags the actual displayed KJV English words directly, in their
+    real English order -- so a frontend can highlight/link a KJV word to
+    its Strong's number exactly, with no fuzzy alignment heuristic needed.
+
+    A single KJV word occasionally corresponds to more than one Strong's
+    number (e.g. an untranslated Hebrew object marker folded onto a nearby
+    word); that's represented as multiple rows sharing the same `position`
+    and `surface_word` rather than a multi-value field.
+    """
+
+    verse = models.ForeignKey(Verse, on_delete=models.CASCADE, related_name='kjv_strongs_tags')
+    position = models.PositiveSmallIntegerField(help_text="Word order within the KJV English verse text")
+    surface_word = models.CharField(max_length=50, help_text="The KJV word/phrase as displayed")
+    original_word = models.CharField(
+        max_length=100, blank=True, default='',
+        help_text="Hebrew/Greek script for this word, when the source provides it. Blank for some rows.",
+    )
+    transliteration = models.CharField(max_length=100, blank=True, default='')
+    strongs_number = models.CharField(max_length=10, help_text="e.g. G2889")
+    morphology = models.CharField(max_length=50, blank=True, default='')
+    strongs_entry = models.ForeignKey(
+        StrongsEntry, on_delete=models.SET_NULL, null=True, blank=True, related_name='kjv_strongs_tags'
+    )
+
+    class Meta:
+        ordering = ['verse', 'position']
+        indexes = [models.Index(fields=['verse', 'position']), models.Index(fields=['strongs_number'])]
+
+    def __str__(self):
+        return f"{self.verse} #{self.position}: {self.surface_word} ({self.strongs_number})"
+
+
 class WordTag(models.Model):
     """
     A single original-language word occurrence within a specific verse,
@@ -163,6 +206,18 @@ class WordTag(models.Model):
     morphology = models.CharField(max_length=50, blank=True, help_text="Parsing code, e.g. N-ASM")
     strongs_entry = models.ForeignKey(
         StrongsEntry, on_delete=models.SET_NULL, null=True, blank=True, related_name='word_tags'
+    )
+    kjv_render_text = models.CharField(
+        max_length=300, blank=True, null=True, default=None,
+        help_text=(
+            "The actual English phrase the KJV renders for this word, sourced "
+            "from tahmmee/interlinear_bibledata, matched by original-language "
+            "word order + Strong's number against this row. NULL = not yet "
+            "cross-referenced. '' (empty string) = cross-referenced and "
+            "confirmed the KJV does not render this word as a separate word "
+            "(e.g. an untranslated article). A non-empty string = the KJV "
+            "wording for this word. Only ever populated for KJV rows."
+        ),
     )
 
     class Meta:

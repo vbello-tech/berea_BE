@@ -32,6 +32,22 @@ def passage_view(request):
     in Python and comparing with `=` avoids the problem entirely while
     also giving a clearer 400 for a genuinely unknown book, instead of a
     404 that could be mistaken for "this chapter/verse doesn't exist".
+
+    --- word_tags sourcing (single, version-independent interlinear) ---
+    The interlinear panel is deliberately the SAME regardless of which
+    translation is being read: it always shows STEPBible's original-
+    language tagging (word_tags), unfiltered, never the reading
+    translation's own surface wording. Changing the Bible version in the
+    reader must not change what the interlinear shows.
+
+    word_tags (TAHOT/TAGNT) is only ever loaded onto BSB's Verse rows in
+    the DB -- no other translation has its own copy -- so we always fetch
+    it via the BSB verse for the same (book, chapter, verse_number),
+    regardless of which translation was requested, and hand it to the
+    serializer keyed by verse_number via context. The serializer no
+    longer does any per-translation filtering (see serializers.py) -- the
+    kjv_render_text field and the old kjv_strongs_tags table are not used
+    by this endpoint at all anymore.
     """
     book_param = request.query_params.get('book')
     chapter = request.query_params.get('chapter')
@@ -68,7 +84,14 @@ def passage_view(request):
 
     verses = list(
         verses.select_related('book')
-        .prefetch_related('concordance_entries', 'cross_references', 'word_tags', 'bulk_cross_references')
+        .prefetch_related(
+            'concordance_entries', 'cross_references', 'bulk_cross_references',
+            # --- was also prefetched here; word_tags is now sourced
+            # separately below (always via BSB, regardless of the
+            # requested translation), and kjv_strongs_tags is no longer
+            # used by this endpoint -- see serializers.py.
+            # 'word_tags', 'kjv_strongs_tags',
+        )
         .order_by('verse_number')
     )
 
@@ -79,7 +102,30 @@ def passage_view(request):
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    serializer = VerseSerializer(verses, many=True, context={'xref_limit': xref_limit})
+    verse_numbers = [v.verse_number for v in verses]
+
+    # Always fetch word_tags via BSB, even when translation == 'BSB' itself
+    # (i.e. even though `verses` above may already *be* the BSB rows). This
+    # costs one extra query in that case, in exchange for one simple code
+    # path instead of a translation-specific branch. If this endpoint's
+    # query volume ever makes that extra query worth avoiding, special-case
+    # translation == 'BSB' to add .prefetch_related('word_tags') to the
+    # `verses` queryset above and reuse it here instead.
+    bsb_verses = list(
+        Verse.objects.filter(
+            book__name=canonical_book, chapter=chapter, translation='BSB', verse_number__in=verse_numbers,
+        ).prefetch_related('word_tags')
+    )
+    word_tags_by_verse_number = {v.verse_number: list(v.word_tags.all()) for v in bsb_verses}
+
+    serializer = VerseSerializer(
+        verses,
+        many=True,
+        context={
+            'xref_limit': xref_limit,
+            'word_tags_by_verse_number': word_tags_by_verse_number,
+        },
+    )
     return Response({'results': serializer.data})
 
 
@@ -90,7 +136,7 @@ def concordance_search_view(request):
     term = request.query_params.get('term')
     strongs = request.query_params.get('strongs')
 
-    verses = Verse.objects.filter(translation='KJV')
+    verses = Verse.objects.all()
     if term:
         verses = verses.filter(concordance_entries__english_term__icontains=term)
     if strongs:
