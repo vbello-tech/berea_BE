@@ -27,5 +27,5 @@ bible/fixtures/tagnt/__pycache__/
 bible/fixtures/tahot/__pycache__/
 bible/fixtures/kjv_interlinear/__pycache__/
 bible/fixtures/kjv_hnt_got/__pycache__/
-
+bible/fixtures/*
 
