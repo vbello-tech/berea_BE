@@ -6,20 +6,20 @@ import re
 
 from .book_order import BOOK_NAME_BY_LOWER
 from .models import Verse, StrongsEntry
-from .serializers import VerseSerializer, StrongsEntrySerializer
+from .serializers import (
+    VerseSerializer, VerseReaderSerializer, VerseStudySerializer, StrongsEntrySerializer,
+)
 
 
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def passage_view(request):
+def _resolve_passage_verses(request):
     """
-    GET /api/passage/?book=John&chapter=3&start=16&end=17&translation=KJV
-    GET /api/passage/?book=John&chapter=3&translation=KJV
-        (start/end omitted -> returns the entire chapter)
-
-    Returns the verses in the given range (or the whole chapter, if start
-    is omitted), each with its concordance entries, cross references, and
-    word tags nested inline.
+    Shared book/chapter/start/end/translation parsing + base Verse queryset
+    for both passage_view (reader) and passage_study_view (study data).
+    Returns (verses_queryset, error_response) -- exactly one of the two is
+    None. The queryset has no prefetch/select_related applied yet; each
+    caller adds only what its own serializer actually needs, since the
+    whole point of splitting these two endpoints is for each to avoid
+    fetching data the other one already loaded (or doesn't need at all).
 
     Book names and translation codes are normalized in Python and matched
     with exact equality rather than Django's __iexact lookup. __iexact
@@ -32,32 +32,15 @@ def passage_view(request):
     in Python and comparing with `=` avoids the problem entirely while
     also giving a clearer 400 for a genuinely unknown book, instead of a
     404 that could be mistaken for "this chapter/verse doesn't exist".
-
-    --- word_tags sourcing (single, version-independent interlinear) ---
-    The interlinear panel is deliberately the SAME regardless of which
-    translation is being read: it always shows STEPBible's original-
-    language tagging (word_tags), unfiltered, never the reading
-    translation's own surface wording. Changing the Bible version in the
-    reader must not change what the interlinear shows.
-
-    word_tags (TAHOT/TAGNT) is only ever loaded onto BSB's Verse rows in
-    the DB -- no other translation has its own copy -- so we always fetch
-    it via the BSB verse for the same (book, chapter, verse_number),
-    regardless of which translation was requested, and hand it to the
-    serializer keyed by verse_number via context. The serializer no
-    longer does any per-translation filtering (see serializers.py) -- the
-    kjv_render_text field and the old kjv_strongs_tags table are not used
-    by this endpoint at all anymore.
     """
     book_param = request.query_params.get('book')
     chapter = request.query_params.get('chapter')
     start = request.query_params.get('start')
     end = request.query_params.get('end', start)
     translation = request.query_params.get('translation', 'KJV').upper()
-    xref_limit = int(request.query_params.get('xref_limit', 10))
 
     if not (book_param and chapter):
-        return Response(
+        return None, Response(
             {'detail': 'book and chapter query params are required '
                        '(start/end are optional -- omit both to get the whole chapter).'},
             status=status.HTTP_400_BAD_REQUEST,
@@ -65,12 +48,12 @@ def passage_view(request):
 
     canonical_book = BOOK_NAME_BY_LOWER.get(book_param.lower())
     if not canonical_book:
-        return Response({'detail': f'Unknown book: {book_param}'}, status=status.HTTP_400_BAD_REQUEST)
+        return None, Response({'detail': f'Unknown book: {book_param}'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
         chapter = int(chapter)
     except ValueError:
-        return Response({'detail': 'chapter must be an integer.'}, status=status.HTTP_400_BAD_REQUEST)
+        return None, Response({'detail': 'chapter must be an integer.'}, status=status.HTTP_400_BAD_REQUEST)
 
     verses = Verse.objects.filter(book__name=canonical_book, chapter=chapter, translation=translation)
 
@@ -79,53 +62,75 @@ def passage_view(request):
             start = int(start)
             end = int(end)
         except ValueError:
-            return Response({'detail': 'start/end must be integers.'}, status=status.HTTP_400_BAD_REQUEST)
+            return None, Response({'detail': 'start/end must be integers.'}, status=status.HTTP_400_BAD_REQUEST)
         verses = verses.filter(verse_number__gte=start, verse_number__lte=end)
 
-    verses = list(
-        verses.select_related('book')
-        .prefetch_related(
-            'concordance_entries', 'cross_references', 'bulk_cross_references',
-            # --- was also prefetched here; word_tags is now sourced
-            # separately below (always via BSB, regardless of the
-            # requested translation), and kjv_strongs_tags is no longer
-            # used by this endpoint -- see serializers.py.
-            # 'word_tags', 'kjv_strongs_tags',
-        )
-        .order_by('verse_number')
-    )
+    return verses, None
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def passage_view(request):
+    """
+    GET /api/passage/?book=John&chapter=3&start=16&end=17&translation=KJV
+    GET /api/passage/?book=John&chapter=3&translation=KJV
+        (start/end omitted -> returns the entire chapter)
+
+    Lightweight: verse text only, for the Scripture Reader. See
+    passage_study_view for concordance/cross-reference/word-tag data --
+    split into a separate request so the reader can render immediately
+    without waiting on that heavier payload.
+    """
+    verses, error = _resolve_passage_verses(request)
+    if error:
+        return error
+
+    book_param = request.query_params.get('book')
+    chapter = request.query_params.get('chapter')
+    start = request.query_params.get('start')
+    end = request.query_params.get('end', start)
+    translation = request.query_params.get('translation', 'KJV').upper()
+
+    verses = list(verses.select_related('book').order_by('verse_number'))
 
     if not verses:
         range_desc = f'{start}-{end}' if start is not None else 'whole chapter'
         return Response(
-            {'detail': f'No verses found for {canonical_book} {chapter}:{range_desc} ({translation}).'},
+            {'detail': f'No verses found for {book_param} {chapter}:{range_desc} ({translation}).'},
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    verse_numbers = [v.verse_number for v in verses]
+    serializer = VerseReaderSerializer(verses, many=True)
+    return Response({'results': serializer.data})
 
-    # Always fetch word_tags via BSB, even when translation == 'BSB' itself
-    # (i.e. even though `verses` above may already *be* the BSB rows). This
-    # costs one extra query in that case, in exchange for one simple code
-    # path instead of a translation-specific branch. If this endpoint's
-    # query volume ever makes that extra query worth avoiding, special-case
-    # translation == 'BSB' to add .prefetch_related('word_tags') to the
-    # `verses` queryset above and reuse it here instead.
-    bsb_verses = list(
-        Verse.objects.filter(
-            book__name=canonical_book, chapter=chapter, translation='BSB', verse_number__in=verse_numbers,
-        ).prefetch_related('word_tags')
-    )
-    word_tags_by_verse_number = {v.verse_number: list(v.word_tags.all()) for v in bsb_verses}
 
-    serializer = VerseSerializer(
-        verses,
-        many=True,
-        context={
-            'xref_limit': xref_limit,
-            'word_tags_by_verse_number': word_tags_by_verse_number,
-        },
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def passage_study_view(request):
+    """
+    GET /api/passage/study/?book=John&chapter=3&start=16&end=17&translation=KJV
+
+    Study Suite data for the same range passage_view would return: each
+    verse's concordance entries, cross references, word tags, and KJV
+    Strong's tags -- fetched separately so the Scripture Reader isn't
+    blocked waiting on this heavier, prefetch-and-serialize-costly payload.
+    Results are keyed by verse_number; the frontend merges this onto the
+    already-rendered reader verses once it arrives.
+    """
+    verses, error = _resolve_passage_verses(request)
+    if error:
+        return error
+
+    xref_limit = int(request.query_params.get('xref_limit', 10))
+
+    verses = list(
+        verses.prefetch_related(
+            'concordance_entries', 'cross_references', 'word_tags',
+            'bulk_cross_references', 'kjv_strongs_tags',
+        ).order_by('verse_number')
     )
+
+    serializer = VerseStudySerializer(verses, many=True, context={'xref_limit': xref_limit})
     return Response({'results': serializer.data})
 
 
